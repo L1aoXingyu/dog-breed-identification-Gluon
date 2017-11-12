@@ -63,10 +63,11 @@ criterion = gl.loss.SoftmaxCrossEntropyLoss()
 
 # ctx = [mx.gpu(0), mx.gpu(1)]
 ctx = mx.gpu(0)
-num_epochs = 200
+num_epochs = 250
 lr = 0.1
 wd = 1e-4
-lr_decay = 0.1
+lr_period = 70
+lr_decay = 0.01
 
 net = gl.model_zoo.vision.resnet50_v2(classes=120)
 net.initialize(init=mx.init.Xavier(), ctx=ctx)
@@ -81,7 +82,8 @@ def get_acc(output, label):
     return correct.asscalar()
 
 
-def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_decay):
+def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
+          lr_decay):
     trainer = gl.Trainer(net.collect_params(), 'sgd',
                          {'learning_rate': lr,
                           'momentum': 0.9,
@@ -89,8 +91,8 @@ def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_decay):
 
     prev_time = datetime.datetime.now()
     for epoch in range(num_epochs):
-        if epoch == 89 or 159:
-            trainer.set_learning_rate = trainer.learning_rate * lr_decay
+        if epoch > 0 and epoch % lr_period == 0:
+            trainer.set_learning_rate(trainer.learning_rate * lr_decay)
         train_loss = 0
         correct = 0
         total = 0
@@ -138,8 +140,11 @@ def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_decay):
                          (epoch, train_loss / total, correct / total))
         prev_time = cur_time
         print(epoch_str + time_str + ', lr ' + str(trainer.learning_rate))
+        if (epoch + 1) % 50 == 0:
+            net.save_params('./resnet_{}.params'.format(epoch + 1))
 
 
-train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_decay)
+train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
+      lr_decay)
 
 net.save_params('./res50.params')
