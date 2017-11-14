@@ -6,6 +6,7 @@ import mxnet as mx
 import numpy as np
 from mxnet import gluon as gl
 from mxnet import nd
+from mxnet.gluon import nn
 
 from data_utils import DogDataSet
 from tensorboardX import SummaryWriter
@@ -67,10 +68,24 @@ num_epochs = 250
 lr = 0.1
 wd = 1e-4
 lr_period = 70
-lr_decay = 0.01
+lr_decay = 0.1
 
-net = gl.model_zoo.vision.resnet50_v2(classes=120)
-net.initialize(init=mx.init.Xavier(), ctx=ctx)
+net = gl.model_zoo.vision.resnet50_v2(pretrained=True, ctx=ctx)
+for _, i in net.features.collect_params().items():
+    i.lr_mult = 0.01
+# net.load_params('./resnet_50.params', ctx=ctx)
+new_classifier = nn.HybridSequential()
+with new_classifier.name_scope():
+    new_classifier.add(nn.BatchNorm(),
+                       nn.Activation('relu'),
+                       nn.GlobalAvgPool2D(), nn.Flatten(), nn.Dense(120))
+new_classifier.initialize(init=mx.init.Xavier(), ctx=ctx)
+net.classifier = new_classifier
+# freeze weight
+# for _, i in net.features.collect_params().items():
+# i.grad_req = 'null'
+# net.initialize(init=mx.init.Xavier(), ctx=ctx)
+# net.collect_params().load('finetune_resnet_20.params', ctx=ctx)
 net.hybridize()
 
 writer = SummaryWriter()
@@ -90,7 +105,7 @@ def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
                           'wd': wd})
 
     prev_time = datetime.datetime.now()
-    for epoch in range(num_epochs):
+    for epoch in range(20, num_epochs):
         if epoch > 0 and epoch % lr_period == 0:
             trainer.set_learning_rate(trainer.learning_rate * lr_decay)
         train_loss = 0
@@ -101,6 +116,9 @@ def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
             data = data.as_in_context(ctx)
             label = label.as_in_context(ctx)
             with mx.autograd.record():
+                # with mx.autograd.pause(train_mode=True):
+                # data_feature = net.features(data)
+                # output = net.classifier(data_feature)
                 output = net(data)
                 loss = criterion(output, label)
             loss.backward()
@@ -140,11 +158,12 @@ def train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
                          (epoch, train_loss / total, correct / total))
         prev_time = cur_time
         print(epoch_str + time_str + ', lr ' + str(trainer.learning_rate))
-        if (epoch + 1) % 50 == 0:
-            net.save_params('./resnet_{}.params'.format(epoch + 1))
+        if (epoch + 1) % 10 == 0:
+            net.collect_params().save(
+                './finetune_resnet_{}.params'.format(epoch + 1))
 
 
 train(net, train_data, valid_data, num_epochs, lr, wd, ctx, lr_period,
       lr_decay)
 
-net.save_params('./res50.params')
+net.collect_params().save('./finetune_resnet.params')
